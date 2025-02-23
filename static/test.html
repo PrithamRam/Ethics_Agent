@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>JSON to HTML Test</title>
+    <style>
+        body { 
+            font-family: system-ui;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .error { color: red; }
+        pre { background: #f5f5f5; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>JSON to HTML Test</h1>
+    
+    <h2>Sample JSON Input:</h2>
+    <textarea id="jsonInput" rows="10" style="width: 100%">
+{
+    "status": "success",
+    "ai_analysis": {
+        "summary": "The use of AI in medical diagnosis raises several ethical considerations.",
+        "recommendations": [
+            "Ensure patient privacy",
+            "Maintain transparency",
+            "Establish clear guidelines"
+        ],
+        "concerns": [
+            "Data privacy",
+            "Algorithm bias",
+            "Patient consent"
+        ]
+    }
+}
+    </textarea>
+    <button onclick="testConversion()">Test Conversion</button>
+    
+    <h2>Result:</h2>
+    <div id="output"></div>
+
+    <script>
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function testConversion() {
+            const outputDiv = document.getElementById('output');
+            try {
+                // Parse JSON input
+                const data = JSON.parse(document.getElementById('jsonInput').value);
+                
+                // Convert to HTML
+                const html = `
+                    <div class="response-section">
+                        <h3>Summary</h3>
+                        <p>${escapeHtml(data.ai_analysis?.summary || 'No summary available')}</p>
+                        
+                        <h3>Recommendations</h3>
+                        <ul>
+                            ${(data.ai_analysis?.recommendations || [])
+                                .map(rec => `<li>${escapeHtml(rec)}</li>`)
+                                .join('')}
+                        </ul>
+
+                        <h3>Concerns</h3>
+                        <ul>
+                            ${(data.ai_analysis?.concerns || [])
+                                .map(concern => `<li>${escapeHtml(concern)}</li>`)
+                                .join('')}
+                        </ul>
+                    </div>
+                `;
+                
+                // Show both raw HTML and rendered result
+                outputDiv.innerHTML = `
+                    <h3>Raw HTML:</h3>
+                    <pre>${escapeHtml(html)}</pre>
+                    
+                    <h3>Rendered Result:</h3>
+                    ${html}
+                `;
+            } catch (error) {
+                outputDiv.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+            }
+        }
+    </script>
+</body>
+</html> 
