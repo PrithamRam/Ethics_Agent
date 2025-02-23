@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medical Ethics Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Medical Ethics Assistant</h1>
+        
+        <!-- Initial Query Form -->
+        <div class="query-section">
+            <form id="query-form">
+                <textarea name="text" placeholder="Enter your ethical query here..."></textarea>
+                <button type="submit">Get Ethical Guidance</button>
+            </form>
+        </div>
+
+        <!-- Response Section -->
+        <div id="response">
+            <h3>AI Analysis</h3>
+            <div id="general-analysis" class="analysis-section">
+                <div class="section-content"></div>
+            </div>
+            
+            <h3>Relevant Papers</h3>
+            <div id="papers" class="papers-section"></div>
+            
+            <h3>Literature Analysis</h3>
+            <div id="literature-analysis" class="analysis-section"></div>
+        </div>
+    </div>
+
+    <script>
+        // Handle initial query submission
+        $('#query-form').submit(async function(e) {
+            e.preventDefault();
+            const queryText = $('textarea[name="text"]').val();
+            
+            const response = await fetch('/api/ethical-guidance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                    text: queryText,
+                    max_results: 10 
+                })
+            });
+
+            const data = await response.json();
+            displayResponse(data);
+        });
+
+        // Handle follow-up questions
+        async function handleFollowUp(question) {
+            const context = $('#response-section .analysis').text();
+            const response = await $.post('/follow_up', {
+                question: question,
+                context: context
+            });
+            appendFollowUpResponse(response);
+        }
+
+        function displayResponse(response) {
+            // Format AI analysis first
+            const aiAnalysis = response.general_analysis
+                .split('\n\n')
+                .filter(para => para.trim())
+                .map(para => `<p>${para.trim()}</p>`)
+                .join('');
+            
+            $('#general-analysis .section-content').html(aiAnalysis);
+            
+            // Format papers next
+            const papersList = $('#papers');
+            papersList.empty();
+            response.papers.forEach(paper => {
+                papersList.append(`
+                    <div class="paper">
+                        <h4>${paper.title}</h4>
+                        <p><strong>Year:</strong> ${paper.year || 'N/A'}</p>
+                        <p><strong>Abstract:</strong> ${paper.abstract}</p>
+                        <p><strong>Ethical Considerations:</strong> 
+                            ${paper.ethical_considerations.length ? 
+                                paper.ethical_considerations.join(', ') : 
+                                'None specified'}
+                        </p>
+                    </div>
+                `);
+            });
+            
+            // Format literature analysis last
+            const litAnalysis = response.literature_analysis
+                .split('\n\n')
+                .map(para => `<p>${para.trim()}</p>`)
+                .join('');
+            
+            $('#literature-analysis').html(`
+                <div class="section-content">${litAnalysis}</div>
+            `);
+        }
+    </script>
+
+    <style>
+    /* Reset container styles */
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Analysis sections */
+    .analysis-section {
+        margin: 1em 0;
+        padding: 1.5em;
+        background: #f8f9fa;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Content within analysis sections */
+    .section-content {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Text formatting */
+    .section-content p {
+        margin: 1em 0;
+        white-space: normal;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        line-height: 1.6;
+    }
+
+    .key-points {
+        margin-top: 1em;
+        padding-top: 1em;
+        border-top: 1px solid #dee2e6;
+    }
+
+    .paper {
+        margin: 1em 0;
+        padding: 1.5em;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        background: white;
+    }
+
+    .paper h4 {
+        color: #2c3e50;
+        margin-top: 0;
+    }
+
+    .paper p {
+        margin: 0.5em 0;
+    }
+
+    .paper strong {
+        color: #495057;
+    }
+    </style>
+</body>
+</html> 

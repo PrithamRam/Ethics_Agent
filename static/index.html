@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medical Ethics Assistant</title>
+    <style>
+    * {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 20px;
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    .description {
+        font-size: 0.9em;
+        color: #666;
+        margin: 1em 0 2em 0;
+        line-height: 1.6;
+    }
+
+    .query-section {
+        margin: 2em 0;
+    }
+
+    textarea {
+        width: 100%;
+        min-height: 150px;
+        padding: 1em;
+        margin-bottom: 1em;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background-color: #f8f9fa;
+        font-family: inherit;
+    }
+
+    textarea::placeholder {
+        color: #666;
+    }
+
+    button {
+        padding: 0.5em 1em;
+        background: #007bff;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: inherit;
+    }
+
+    /* Analysis sections */
+    .analysis-section {
+        margin: 1em 0;
+        padding: 1.5em;
+        background: #f8f9fa;
+        border-radius: 8px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Content within analysis sections */
+    .section-content {
+        width: 100%;
+        box-sizing: border-box;
+    }
+
+    /* Text formatting */
+    .section-content p {
+        margin: 1em 0;
+        white-space: normal;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        line-height: 1.6;
+    }
+
+    .paper {
+        margin: 1em 0;
+        padding: 1.5em;
+        border: 1px solid #e9ecef;
+        border-radius: 8px;
+        background: white;
+    }
+
+    .paper h4 {
+        color: #2c3e50;
+        margin-top: 0;
+    }
+
+    .paper p {
+        margin: 0.5em 0;
+    }
+
+    .paper strong {
+        color: #495057;
+    }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Medical Ethics Assistant</h1>
+        
+        <div class="description">
+            This is a tool to analyse your query in light of about 100,000 publications from PubMed. 
+            The results are provided in three sections: an OpenAI based analysis leveraging the large 
+            language model's training data, selected 10 references and abstracts for further consideration, 
+            and an analysis based on the selected references. Please note that this is an experimental tool. 
+            Please hit refresh on your browser to start a new query.
+        </div>
+        
+        <div class="query-section">
+            <form id="query-form">
+                <textarea id="query" 
+                    placeholder="Enter your biomedical ethics query, case study or potential situation in this space"></textarea>
+                <button type="submit">Submit Query</button>
+            </form>
+        </div>
+
+        <div id="response">
+            <h3>AI Analysis</h3>
+            <div id="general-analysis" class="analysis-section">
+                <div class="section-content"></div>
+            </div>
+            
+            <h3>Relevant Papers</h3>
+            <div id="papers" class="papers-section"></div>
+            
+            <h3>Literature Analysis</h3>
+            <div id="literature-analysis" class="analysis-section"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('query-form').onsubmit = async function(e) {
+            e.preventDefault();
+            
+            const response = await fetch('/api/ethical-guidance', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    text: document.getElementById('query').value,
+                    max_results: 10
+                })
+            });
+            
+            const data = await response.json();
+            displayResponse(data);
+        };
+
+        function displayResponse(response) {
+            // Format AI analysis first
+            const aiAnalysis = response.general_analysis
+                .split('\n\n')
+                .filter(para => para.trim())
+                .map(para => `<p>${para.trim()}</p>`)
+                .join('');
+            
+            document.querySelector('#general-analysis .section-content').innerHTML = aiAnalysis;
+            
+            // Format papers next
+            const papersList = document.getElementById('papers');
+            papersList.innerHTML = response.papers.map(paper => `
+                <div class="paper">
+                    <h4>${paper.title}</h4>
+                    <p><strong>Year:</strong> ${paper.year || 'N/A'}</p>
+                    <p><strong>Abstract:</strong> ${paper.abstract}</p>
+                    <p><strong>Ethical Considerations:</strong> 
+                        ${paper.ethical_considerations.length ? 
+                            paper.ethical_considerations.join(', ') : 
+                            'None specified'}
+                    </p>
+                </div>
+            `).join('');
+            
+            // Format literature analysis last
+            const litAnalysis = response.literature_analysis
+                .split('\n\n')
+                .map(para => `<p>${para.trim()}</p>`)
+                .join('');
+            
+            document.getElementById('literature-analysis').innerHTML = 
+                `<div class="section-content">${litAnalysis}</div>`;
+        }
+    </script>
+</body>
+</html> 

@@ -1,0 +1,66 @@
+<div class="follow-up-section">
+    <div class="follow-up-question">
+        <strong>Q:</strong> {{ question }}
+    </div>
+    
+    <div class="analysis">
+        {% if analysis.summary %}
+        <div class="section">
+            <h2>Response</h2>
+            <p>{{ analysis.summary }}</p>
+        </div>
+        {% endif %}
+
+        {% if analysis.recommendations %}
+        <div class="section recommendations">
+            <h2>Key Points</h2>
+            <ul>
+            {% for rec in analysis.recommendations %}
+                <li>{{ rec }}</li>
+            {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
+
+        {% if analysis.follow_up_questions %}
+        <div class="section follow-up">
+            <h2>Additional Questions</h2>
+            <div class="questions-list">
+                {% for question in analysis.follow_up_questions %}
+                <button type="button" 
+                        class="follow-up-btn" 
+                        onclick="window.handleFollowUpClick('{{ question|e }}', '{{ conversation_id }}')">
+                    {{ question }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if references and references|length > 0 %}
+        <div class="section references">
+            <h2>Additional Sources</h2>
+            {% for ref in references %}
+            <div class="paper">
+                <h4>{{ ref.title }}</h4>
+                <p class="pubmed-link">
+                    <a href="https://pubmed.ncbi.nlm.nih.gov/{{ ref.pubmed_id }}/" target="_blank">
+                        View on PubMed (PMID: {{ ref.pubmed_id }})
+                    </a>
+                </p>
+                {% if ref.ethical_considerations %}
+                <div class="ethical-considerations">
+                    <h5>Key Points:</h5>
+                    <ul>
+                        {% for point in ref.ethical_considerations %}
+                        <li>{{ point }}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div> 

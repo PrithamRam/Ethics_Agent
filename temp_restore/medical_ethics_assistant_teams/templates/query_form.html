@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medical Ethics Assistant</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+</head>
+<body>
+    <div class="container">
+        <h1>Medical Ethics Assistant</h1>
+        
+        <!-- Initial Query Form -->
+        <div class="query-section">
+            <form id="query-form">
+                <textarea name="query" placeholder="Enter your ethical query here..."></textarea>
+                <button type="submit">Get Ethical Guidance</button>
+            </form>
+        </div>
+
+        <!-- Response Section -->
+        <div id="response-section" style="display: none;">
+            <div class="analysis"></div>
+            
+            <!-- Interactive Follow-up Section -->
+            <div class="follow-up-section">
+                <h3>Follow-up Questions</h3>
+                <div class="questions-list"></div>
+                
+                <!-- Custom Follow-up -->
+                <div class="custom-follow-up">
+                    <textarea placeholder="Ask your own follow-up question..."></textarea>
+                    <button onclick="submitFollowUp()">Submit</button>
+                </div>
+            </div>
+
+            <!-- References Section -->
+            <div class="references">
+                <h3>Referenced Papers</h3>
+                <div class="papers-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Handle initial query submission
+        $('#query-form').submit(async function(e) {
+            e.preventDefault();
+            const query = $('textarea[name="query"]').val();
+            
+            const response = await $.post('/submit_query', {query: query});
+            displayResponse(response);
+        });
+
+        // Handle follow-up questions
+        async function handleFollowUp(question) {
+            const context = $('#response-section .analysis').text();
+            const response = await $.post('/follow_up', {
+                question: question,
+                context: context
+            });
+            appendFollowUpResponse(response);
+        }
+
+        function displayResponse(response) {
+            $('#response-section').show();
+            $('.analysis').html(response.html);
+            
+            // Display follow-up questions as clickable buttons
+            const questionsList = $('.questions-list');
+            questionsList.empty();
+            response.follow_up_questions.forEach(q => {
+                questionsList.append(
+                    `<button onclick="handleFollowUp('${q}')">${q}</button>`
+                );
+            });
+
+            // Display references
+            const papersList = $('.papers-list');
+            papersList.empty();
+            response.references.forEach(ref => {
+                papersList.append(`
+                    <div class="paper">
+                        <h4>${ref.title}</h4>
+                        <p>Authors: ${ref.authors.map(a => a.name).join(', ')}</p>
+                        <p>PMID: ${ref.pubmed_id}</p>
+                        <button onclick="showAbstract('${ref.pubmed_id}')">
+                            Show Abstract
+                        </button>
+                    </div>
+                `);
+            });
+        }
+    </script>
+</body>
+</html> 

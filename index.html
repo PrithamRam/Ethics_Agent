@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Medical Ethics AI Assistant</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Medical Ethics AI Assistant</h1>
+        
+        <div class="description">
+            An AI-powered system for analyzing medical ethics queries using literature review and GPT-4 analysis.
+        </div>
+
+        <div class="prerequisites">
+            <h2>Prerequisites</h2>
+            <ul>
+                <li>Python 3.8 or higher</li>
+                <li>OpenAI API key (<a href="https://platform.openai.com/signup">Get one here</a>)</li>
+                <li>PubMed API key (<a href="https://ncbiinsights.ncbi.nlm.nih.gov/2017/11/02/new-api-keys-for-the-e-utilities/">Get one here</a>)</li>
+                <li>Git installed on your machine</li>
+            </ul>
+        </div>
+
+        <div class="installation">
+            <h2>Step-by-Step Installation</h2>
+            
+            <h3>1. Clone the Repository</h3>
+            <pre><code>git clone https://github.com/PrithamRam/Ethics_Agent.git
+cd Ethics_Agent</code></pre>
+
+            <h3>2. Set Up Virtual Environment</h3>
+            <pre><code># Create virtual environment
+python -m venv .venv
+
+# Activate virtual environment
+# On Windows:
+.venv\Scripts\activate
+# On macOS/Linux:
+source .venv/bin/activate</code></pre>
+
+            <h3>3. Install Dependencies</h3>
+            <pre><code>pip install -r requirements.txt</code></pre>
+
+            <h3>4. Configure API Keys</h3>
+            <pre><code># Create .env file
+cp .env.example .env
+
+# Edit .env file with your API keys:
+OPENAI_API_KEY=your_openai_key_here
+PUBMED_EMAIL=your_email@domain.com
+PUBMED_API_KEY=your_pubmed_api_key</code></pre>
+
+            <h3>5. Run the Application</h3>
+            <pre><code>python main.py</code></pre>
+
+            <h3>6. Access the Interface</h3>
+            <p>Open your web browser and go to: <code>http://localhost:8003</code></p>
+        </div>
+
+        <div class="troubleshooting">
+            <h2>Common Issues & Solutions</h2>
+            <ul>
+                <li><strong>ModuleNotFoundError</strong>: Make sure you've activated the virtual environment and installed requirements</li>
+                <li><strong>API Key Errors</strong>: Verify your API keys in the .env file</li>
+                <li><strong>Port in Use</strong>: If port 8003 is busy, modify the port in main.py</li>
+                <li><strong>Database Issues</strong>: Delete ethics.db and restart to rebuild the database</li>
+            </ul>
+        </div>
+
+        <div class="usage">
+            <h2>Using the System</h2>
+            <ol>
+                <li>Enter your medical ethics query in the text box</li>
+                <li>Click "Submit Query"</li>
+                <li>Review the three-part analysis:
+                    <ul>
+                        <li>AI Analysis using GPT-4</li>
+                        <li>Relevant Papers from PubMed</li>
+                        <li>Literature-based Analysis</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+
+        <div class="links">
+            <h2>Useful Links</h2>
+            <ul>
+                <li><a href="https://github.com/PrithamRam/Ethics_Agent">GitHub Repository</a></li>
+                <li><a href="https://github.com/PrithamRam/Ethics_Agent/issues">Report Issues</a></li>
+                <li><a href="https://platform.openai.com/docs/api-reference">OpenAI API Documentation</a></li>
+                <li><a href="https://www.ncbi.nlm.nih.gov/books/NBK25497/">PubMed API Documentation</a></li>
+            </ul>
+        </div>
+
+        <div class="note">
+            <p><strong>Note:</strong> This is an experimental tool. Please use it as a starting point for ethical discussions, not as definitive guidance.</p>
+        </div>
+    </div>
+</body>
+</html> 

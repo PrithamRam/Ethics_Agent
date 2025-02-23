@@ -1,0 +1,16 @@
+
+# Sensitive files
+.env
+*.db
+__pycache__/
+.venv/
+
+# Data files
+*.csv
+*.json
+data/
+medical_ethics_assistant_teams*.zip
+
+# OS files
+.DS_Store
+

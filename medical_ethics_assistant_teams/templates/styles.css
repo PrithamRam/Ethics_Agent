@@ -1,0 +1,153 @@
+:root {
+    --primary-color: #2c3e50;
+    --secondary-color: #3498db;
+    --background-color: #f5f6fa;
+    --text-color: #2c3e50;
+    --border-color: #dcdde1;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    color: var(--text-color);
+    background-color: var(--background-color);
+    margin: 0;
+    padding: 0;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 2rem;
+}
+
+header {
+    background-color: var(--primary-color);
+    color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    margin-bottom: 2rem;
+}
+
+section {
+    background-color: white;
+    padding: 2rem;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    margin-bottom: 2rem;
+}
+
+.reference-item {
+    border: 1px solid var(--border-color);
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-radius: 4px;
+}
+
+.ref-title {
+    font-weight: bold;
+    color: var(--secondary-color);
+}
+
+.ref-authors {
+    font-style: italic;
+}
+
+.ref-pubmed {
+    color: #666;
+    font-size: 0.9em;
+}
+
+.ref-relevance {
+    color: var(--secondary-color);
+    font-weight: bold;
+}
+
+.controls {
+    position: sticky;
+    top: 0;
+    background: var(--background-color);
+    padding: 1rem;
+    z-index: 100;
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+#reference-filter {
+    flex: 1;
+    padding: 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+}
+
+#export-pdf {
+    background: var(--secondary-color);
+    color: white;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 4px;
+    cursor: pointer;
+}
+
+.section-header {
+    cursor: pointer;
+    position: relative;
+    padding-right: 2rem;
+}
+
+.section-header::after {
+    content: '▼';
+    position: absolute;
+    right: 1rem;
+    transition: transform 0.3s;
+}
+
+.section-header.collapsed::after {
+    transform: rotate(-90deg);
+}
+
+.reference-item {
+    transition: all 0.3s;
+}
+
+.reference-item:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.copy-citation {
+    background: none;
+    border: 1px solid var(--secondary-color);
+    color: var(--secondary-color);
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    cursor: pointer;
+    margin-left: 1rem;
+}
+
+.toggle-details {
+    background: none;
+    border: none;
+    color: var(--secondary-color);
+    cursor: pointer;
+    padding: 0.5rem 0;
+    width: 100%;
+    text-align: left;
+}
+
+.ref-details {
+    padding: 1rem;
+    background: var(--background-color);
+    border-radius: 4px;
+    margin-top: 0.5rem;
+}
+
+@media print {
+    .controls {
+        display: none;
+    }
+    
+    .section-content {
+        display: block !important;
+    }
+} 
