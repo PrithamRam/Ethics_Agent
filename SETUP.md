@@ -7,6 +7,27 @@
 - Elasticsearch (for paper database)
 - Git (for version control)
 
+## Required Data Files
+
+Due to size limitations, some large files are not included in the repository. You'll need to:
+
+1. Download Elasticsearch 8.12.1:
+```bash
+# On macOS
+wget https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.12.1-darwin-x86_64.tar.gz
+tar -xzf elasticsearch-8.12.1-darwin-x86_64.tar.gz
+
+# On Windows
+# Download from https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-8.12.1-windows-x86_64.zip
+# Extract the ZIP file
+```
+
+2. Download the papers database:
+```bash
+# Request access to the papers database and place it in:
+data/pubmed_papers.json
+```
+
 ## Elasticsearch Setup
 
 1. The application includes Elasticsearch 8.12.1. To start Elasticsearch:
