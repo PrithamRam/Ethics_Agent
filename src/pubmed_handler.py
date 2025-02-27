@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any
 import aiohttp
 from Bio import Entrez, Medline
 import asyncio
@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 import os
 from dotenv import load_dotenv
+from openai import OpenAI
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,12 @@ class PubMedHandler:
         if self.api_key:
             Entrez.api_key = self.api_key
             
+        # Initialize OpenAI client
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if not openai_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+        self.client = OpenAI(api_key=openai_key)
+        
         logger.info(f"Initialized PubMed handler with email: {self.email}")
 
     async def fetch_papers(self, pubmed_ids: List[str], max_papers: int = 10) -> List[Dict]:
@@ -174,19 +181,22 @@ class PubMedHandler:
         return authors
 
     async def search_pubmed(self, query: str) -> Tuple[List[str], int]:
-        """Search PubMed for relevant papers"""
+        """Search PubMed based on ethical analysis of the case"""
         try:
-            # Add ethics-related terms to query
-            ethics_query = f"{query} AND (ethics OR ethical OR bioethics OR moral)"
+            # First, analyze the case to identify key ethical components
+            case_analysis = await self._analyze_case_for_search(query)
+            
+            # Build search query from analysis
+            enhanced_query = self._build_search_from_analysis(case_analysis)
             
             async with aiohttp.ClientSession() as session:
                 async with session.get(
                     f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
                     params={
                         "db": "pubmed",
-                        "term": ethics_query,
+                        "term": enhanced_query,
                         "retmode": "json",
-                        "retmax": self.max_results,
+                        "retmax": 50,  # Get more results to filter
                         "sort": "relevance"
                     }
                 ) as response:
@@ -194,18 +204,125 @@ class PubMedHandler:
                         raise Exception(f"PubMed API error: {response.status}")
                     
                     data = await response.json()
-                    
-                    if "esearchresult" not in data:
-                        raise Exception("Invalid response from PubMed")
-                        
-                    pmids = data["esearchresult"].get("idlist", [])
-                    total_results = int(data["esearchresult"].get("count", 0))
-                    
-                    return pmids, total_results
+                    return data["esearchresult"].get("idlist", []), int(data["esearchresult"].get("count", 0))
 
         except Exception as e:
             logger.error(f"Error searching PubMed: {str(e)}")
             return [], 0
+
+    async def _analyze_case_for_search(self, query: str) -> Dict:
+        """Analyze case to identify key ethical components for search"""
+        try:
+            prompt = f"""Analyze this medical ethics case to identify search components:
+
+Case:
+{query}
+
+Identify:
+1. Primary ethical issues (e.g., confidentiality, autonomy)
+2. Type of clinical scenario (e.g., disclosure, testing)
+3. Stakeholder relationships (e.g., provider-patient, partners)
+4. Relevant medical context (e.g., infectious disease, genetic testing)
+
+Format response as JSON with these categories and specific terms for searching."""
+
+            response = await self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are a medical ethicist helping construct a literature search strategy."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3
+            )
+            
+            return json.loads(response.choices[0].message.content)
+        except Exception as e:
+            logger.error(f"Error analyzing case: {str(e)}")
+            return {}
+
+    def _build_search_from_analysis(self, analysis: Dict) -> str:
+        """Build PubMed search query from case analysis"""
+        query_parts = []
+        
+        # Build ethical issues component
+        if ethical_issues := analysis.get('primary_ethical_issues', []):
+            ethical_terms = ' OR '.join(f'"{issue}"[Title/Abstract]' for issue in ethical_issues)
+            query_parts.append(f"({ethical_terms})")
+        
+        # Build clinical scenario component
+        if scenario := analysis.get('clinical_scenario', []):
+            scenario_terms = ' OR '.join(f'"{term}"[Title/Abstract]' for term in scenario)
+            query_parts.append(f"({scenario_terms})")
+        
+        # Build relationships component
+        if relationships := analysis.get('stakeholder_relationships', []):
+            relationship_terms = ' OR '.join(f'"{rel}"[Title/Abstract]' for rel in relationships)
+            query_parts.append(f"({relationship_terms})")
+        
+        # Build medical context component
+        if context := analysis.get('medical_context', []):
+            context_terms = ' OR '.join(f'"{ctx}"[Title/Abstract]' for ctx in context)
+            query_parts.append(f"({context_terms})")
+        
+        # Combine with ethics focus
+        base_query = " AND ".join(query_parts)
+        return f"""
+            ({base_query}) AND 
+            (
+                "ethics"[MeSH Terms] OR 
+                "ethical"[Title/Abstract] OR 
+                "bioethics"[MeSH Terms] OR
+                "guidelines"[Publication Type] OR
+                "consensus"[Title/Abstract]
+            )
+        """
+
+    def _calculate_relevance_score(self, query: str, paper: Dict) -> float:
+        """Calculate relevance score with focus on STI/HIV ethics"""
+        score = 0.0
+        
+        # Key themes for this case
+        priority_terms = {
+            "partner notification": 3.0,
+            "contact tracing": 3.0,
+            "confidentiality": 2.5,
+            "HIV testing": 2.5,
+            "syphilis": 2.0,
+            "sexual health": 2.0,
+            "MSM": 2.0,
+            "disclosure": 2.0
+        }
+        
+        # Score title matches with priority terms
+        title = paper["title"].lower()
+        for term, weight in priority_terms.items():
+            if term in title:
+                score += weight
+        
+        # Score abstract with priority terms
+        if paper.get("abstract"):
+            abstract = paper["abstract"].lower()
+            for term, weight in priority_terms.items():
+                if term in abstract:
+                    score += weight * 0.5
+        
+        # Extra weight for guidelines about partner notification
+        if ("partner" in title and ("notification" in title or "disclosure" in title)):
+            score += 4.0
+        
+        # Recency bonus
+        if paper.get("year"):
+            try:
+                year = int(paper["year"])
+                current_year = 2024
+                if year >= current_year - 3:
+                    score += 2.0
+                elif year >= current_year - 5:
+                    score += 1.0
+            except ValueError:
+                pass
+        
+        return score
 
     async def get_relevant_papers(self, query: str) -> List[Dict]:
         """Get relevant papers for a query"""

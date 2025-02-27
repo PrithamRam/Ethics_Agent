@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 from openai import OpenAI
 from src.pubmed_handler import PubMedHandler
-from src.ethics_database import EthicsDatabase
+from src.ethics_db import EthicsDB
 from src.document_processor import DocumentProcessor
 from src.config import SystemConfig
 import json
@@ -19,24 +19,29 @@ class MedicalEthicsAssistant:
         self.config = config or SystemConfig()
         load_dotenv()
         self.openai_key = os.getenv('OPENAI_API_KEY')
-        self.client = OpenAI(api_key=self.openai_key)  # Create client instance
+        self.client = OpenAI(api_key=self.openai_key)
         
-        self.pubmed_handler = PubMedHandler(self.config)
-        self.ethics_db = EthicsDatabase()
+        # Initialize components without passing self
+        self.pubmed_handler = PubMedHandler()
+        self.ethics_db = EthicsDB()
         self.doc_processor = DocumentProcessor()
         self.response_parser = ResponseParser()
         self.template_manager = TemplateManager()
-        self.conversation_history = []  # Store conversation history
-        self.current_query_context = None  # Store the current query context
-        self.last_response = None  # Store the last response
-    
+        self.conversation_history = []
+        self.current_query_context = None
+        self.last_response = None
+
     @classmethod
-    async def create(cls, config: SystemConfig = None):
+    async def create(cls, config: SystemConfig = None) -> 'MedicalEthicsAssistant':
         """Factory method to create and initialize the assistant"""
-        assistant = cls(config)
-        # Get connection will initialize the database
-        await assistant.ethics_db.get_connection()
-        return assistant
+        # Create instance without passing config to __init__
+        instance = cls()
+        # Set config after creation if provided
+        if config:
+            instance.config = config
+        # Initialize database connection
+        await instance.ethics_db.get_connection()
+        return instance
     
     async def initialize_knowledge_base(self, abstract_ethics_path: str):
         """Initialize the knowledge base from the abstract-ethics.txt file"""
@@ -53,11 +58,54 @@ class MedicalEthicsAssistant:
         try:
             messages = []
             
-            # Add system message
-            messages.append({
-                "role": "system",
-                "content": "You are an AI assistant specializing in medical ethics. Provide detailed, structured analysis of ethical considerations."
-            })
+            # Add system message with context-specific instructions
+            if "Format the response as a strict JSON object" in prompt:
+                # For search terms extraction
+                messages.append({
+                    "role": "system",
+                    "content": """You are a medical ethics expert that extracts key terms from cases.
+                    When asked to return JSON:
+                    1. Return ONLY a valid JSON object with no additional text
+                    2. Do not use markdown formatting or code blocks
+                    3. Each category must contain an array of strings
+                    4. Include at least 2-3 terms in each relevant category
+                    5. Medical terms should be specific (e.g., "advanced dementia" not just "dementia")
+                    6. Ethical terms should be precise (e.g., "patient autonomy" not just "autonomy")
+                    7. Example format:
+                    {
+                        "medical_conditions": ["advanced dementia", "acute kidney failure"],
+                        "treatments": ["dialysis", "palliative care"],
+                        "ethical_principles": ["patient autonomy", "beneficence"],
+                        "care_settings": ["intensive care unit", "long-term care facility"],
+                        "key_issues": ["guardian reluctance", "resource allocation"]
+                    }"""
+                })
+            else:
+                # For other analysis tasks
+                messages.append({
+                    "role": "system",
+                    "content": """You are an AI assistant specializing in medical ethics. Your responses must:
+
+1. Use EXACTLY the section headers provided in the prompt
+2. Format all lists with "- " bullet points (no numbers)
+3. Provide detailed, substantive content for each section
+4. Keep the summary section as a paragraph without bullets
+5. Include at least 3 bullet points for each list section
+6. Focus on practical, actionable recommendations
+7. Support points with ethical principles and reasoning
+8. Avoid section numbers in the content itself
+
+Format sections exactly as:
+SUMMARY
+(paragraph)
+
+RECOMMENDATIONS
+- First point
+- Second point
+- Third point
+
+And so on for other sections."""
+                })
             
             # Add context if provided
             if context:
@@ -79,7 +127,7 @@ class MedicalEthicsAssistant:
                 model="gpt-4",
                 messages=messages,
                 temperature=0.7,
-                max_tokens=1000
+                max_tokens=2000  # Increased token limit for more detailed responses
             )
             
             if not response.choices:
@@ -95,145 +143,110 @@ class MedicalEthicsAssistant:
                 raise ValueError("OpenAI API key is invalid or not set. Please check your .env file.")
             raise
     
-    async def get_ethical_guidance(self, question: str) -> Dict[str, Any]:
-        """Get ethical guidance for a medical ethics question"""
+    async def _analyze_papers_for_case(self, papers: List[Dict], question: str) -> str:
+        """Analyze papers for their applicability to the current case"""
         try:
-            # Get relevant papers
-            logger.info(f"Searching papers for question: {question}")
-            try:
-                papers = await self.ethics_db.search_relevant_references(question)
-            except Exception as db_error:
-                logger.error(f"Database error: {str(db_error)}")
-                raise ValueError(f"Failed to search database: {str(db_error)}")
-
-            if not papers and isinstance(papers, list):
-                logger.info("No papers found in database")
+            # If no papers found, return early
+            if not papers:
+                return "No relevant papers found in the database."
             
-            # Structure for both terminal logging and HTML response
-            literature_analysis = {
-                'papers': papers if papers else []
-            }
-
-            # Log literature analysis in same format as HTML will display
-            logger.info("\n=== Literature Analysis ===")
+            # Format papers for analysis
+            papers_to_analyze = []
             for paper in papers:
-                logger.info(f"\nPaper: {paper['title']}\n")
-                logger.info(f"Abstract: {paper['abstract']}\n")
-                logger.info(f"Ethical Considerations: {paper['ethical_considerations']}\n")
-                logger.info(f"Keywords: {paper['keywords']}\n")
-                logger.info(f"Relevance Score: {paper['relevance_score']}\n")
-
-            # Get AI analysis with literature context using the SAME papers
-            literature_context = "\n".join([
-                f"""
-                Title: {paper['title']}
-                Ethical Considerations: {', '.join(paper['ethical_considerations'])}
-                Keywords: {', '.join(paper['keywords'])}
-                Relevance Score: {paper['relevance_score']}
-                """ for paper in papers
-            ]) if papers else "No specific literature found."
-
-            ai_prompt = f"""Based on both the literature and general medical ethics principles, analyze the following query:
-
-                    Query: {question}
-
-                    Relevant Literature:
-                    {literature_context}
-
-                    Please provide a structured response with:
-                    1. Summary (including insights from literature if available)
-                    2. Key Recommendations (based on literature and principles)
-                    3. Ethical Concerns
-                    4. Mitigation Strategies
-                    5. Follow-up Questions
-                    """
+                # Convert author format if needed
+                if 'authors' in paper:
+                    if isinstance(paper['authors'], list):
+                        if all(isinstance(a, str) for a in paper['authors']):
+                            # Convert string authors to dict format
+                            paper['authors'] = [{'last_name': a} for a in paper['authors']]
+                        # else assume it's already in correct format
+                    else:
+                        paper['authors'] = [{'last_name': 'Unknown'}]
+                else:
+                    paper['authors'] = [{'last_name': 'Unknown'}]
+                
+                papers_to_analyze.append(paper)
             
-            # Get and log raw AI response
-            ai_response = await self._get_gpt_response(ai_prompt)
-            logger.info("\n=== AI Analysis ===")
-            logger.info(f"\nAI Response: {ai_response}\n")
+            prompt = f"""Analyze these medical ethics papers specifically for this case:
 
-            # Parse AI response into sections
-            sections = {
-                'summary': '',
-                'recommendations': [],
-                'concerns': [],
-                'strategies': [],
-                'questions': []
-            }
+Case:
+{question}
 
-            current_section = None
-            section_text = []
-            
-            for line in ai_response.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
+Papers to analyze:
+{self._format_papers_for_prompt(papers_to_analyze)}
 
-                if '1. Summary' in line:
-                    current_section = 'summary'
-                elif '2. Key Recommendations' in line:
-                    sections['summary'] = '\n'.join(section_text).strip()
-                    section_text = []
-                    current_section = 'recommendations'
-                elif '3. Ethical Concerns' in line:
-                    current_section = 'concerns'
-                elif '4. Mitigation Strategies' in line:
-                    current_section = 'strategies'
-                elif '5. Follow-up Questions' in line:
-                    current_section = 'questions'
-                elif line and current_section:
-                    if current_section == 'summary':
-                        section_text.append(line)
-                    elif line.startswith('-') or line.startswith('•'):
-                        sections[current_section].append(line[1:].strip())
-                    elif not any(marker in line for marker in ['1.', '2.', '3.', '4.', '5.']):
-                        if current_section == 'summary':
-                            section_text.append(line)
-                        else:
-                            sections[current_section].append(line.strip())
+Please provide:
+1. EVIDENCE-BASED RECOMMENDATIONS
+   - Provide 3-4 specific recommendations
+   - Each recommendation must cite a specific paper
+   - Explain how each recommendation applies to this case
 
-            if current_section == 'summary':
-                sections['summary'] = '\n'.join(section_text).strip()
+2. SYNTHESIS
+   - Integrate the perspectives from all papers
+   - Summarize the key ethical principles identified
+   - Explain how these principles apply to this case
 
-            # Log structured response in same format as HTML
-            logger.info("\n=== Structured AI Response ===\n")
-            logger.info("SUMMARY:")
-            logger.info(sections['summary'])
-            logger.info("\nRECOMMENDATIONS:")
-            for r in sections['recommendations']:
-                logger.info(f"• {r}")
-            logger.info("\nCONCERNS:")
-            for c in sections['concerns']:
-                logger.info(f"• {c}")
-            logger.info("\nSTRATEGIES:")
-            for s in sections['strategies']:
-                logger.info(f"• {s}")
-            logger.info("\nQUESTIONS:")
-            for q in sections['questions']:
-                logger.info(f"• {q}")
+Use EXACTLY these section headers and format recommendations with paper citations.
+"""
 
-            # Return the exact same data we logged
-            response_data = {
-                'status': 'success',
-                'literature_analysis': literature_analysis,
-                'ai_analysis': sections
-            }
-            
-            # Log what we're sending to HTML
-            logger.info(f"\nSending to HTML: {json.dumps(response_data, indent=2)}")
-            
-            return response_data
+            response = await self._get_gpt_response(prompt)
+            return response
 
         except Exception as e:
-            error_msg = f"Error in get_ethical_guidance: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-            return {
-                'status': 'error',
-                'error': error_msg,
-                'literature_analysis': {'papers': []},
-                'ai_analysis': None
+            logger.error(f"Error analyzing papers: {str(e)}", exc_info=True)
+            return "Error analyzing literature"
+
+    def _format_papers_for_prompt(self, papers: List[Dict]) -> str:
+        """Format papers for GPT analysis"""
+        formatted = []
+        for paper in papers:
+            # Format authors safely
+            authors = paper.get('authors', [])
+            if isinstance(authors, list):
+                author_names = ', '.join(a.get('last_name', '') for a in authors)
+            else:
+                author_names = 'Unknown'
+
+            paper_text = f"""
+Title: {paper.get('title', 'Untitled')}
+Authors: {author_names}
+Year: {paper.get('year', 'N/A')}
+Journal: {paper.get('journal', 'N/A')}
+Abstract: {paper.get('abstract', 'No abstract available')}
+Ethical Considerations: {', '.join(paper.get('ethical_considerations', []))}
+"""
+            formatted.append(paper_text)
+        
+        return "\n---\n".join(formatted)
+
+    async def get_ethical_guidance(self, query: str) -> Dict[str, Any]:
+        """Get ethical guidance for a query"""
+        try:
+            logger.info("Getting initial AI analysis...")
+            ai_analysis = await self._get_initial_analysis(query)
+            logger.info("Got AI analysis")
+
+            logger.info("Getting relevant papers...")
+            papers = await self.get_relevant_papers(query, ai_analysis)
+            logger.info(f"Found {len(papers['papers'])} relevant papers")
+
+            logger.info("Analyzing papers...")
+            lit_analysis = await self._analyze_papers_for_case(papers['papers'], query)
+            logger.info("Generated literature analysis")
+
+            response = {
+                "ai_analysis": ai_analysis,
+                "literature_analysis": lit_analysis,
+                "relevant_papers": papers['papers'],
+                "search_terms": papers['search_terms']
             }
+
+            logger.info(f"Final response: {json.dumps(response, indent=2)}")
+            return response
+
+        except Exception as e:
+            logger.error(f"Error getting ethical guidance: {str(e)}", exc_info=True)
+            raise
     
     async def _analyze_literature(self, refs: List[Dict]) -> str:
         """Analyze the literature evidence"""
@@ -489,4 +502,214 @@ class MedicalEthicsAssistant:
             return False
         except Exception as e:
             logger.error(f"Error initializing database: {str(e)}")
-            return False 
+            return False
+
+    async def _extract_search_concepts(self, ai_analysis: Dict) -> Dict[str, float]:
+        """Extract search concepts and their importance weights from AI analysis"""
+        try:
+            # Create prompt using the AI analysis
+            prompt = f"""Extract key concepts and their importance weights from this AI analysis:
+
+            Analysis: {ai_analysis['summary']}
+            
+            Return a Python dictionary with concepts and weights in this exact format:
+            {{
+                'ethical_principles': {{'autonomy': 0.9, 'beneficence': 0.8}},
+                'medical_terms': {{'dementia': 0.9, 'kidney_failure': 0.8}},
+                'stakeholder_roles': {{'guardian': 0.9, 'caregiver': 0.8}},
+                'care_settings': {{'care_facility': 0.8, 'hospital': 0.7}}
+            }}
+
+            Use only lowercase words, underscores for spaces, and weights between 0.0-1.0.
+            Include only the most relevant terms from the analysis.
+            """
+            
+            response = await self._get_gpt_response(prompt)
+            # Clean the response string and safely evaluate it
+            cleaned_response = response.strip().replace('\n', '').replace(' ', '')
+            concepts = eval(cleaned_response)
+            return concepts
+        except Exception as e:
+            logger.error(f"Error extracting search concepts: {str(e)}")
+            # Return default concepts if extraction fails
+            return {
+                'ethical_principles': {'autonomy': 0.9, 'beneficence': 0.8},
+                'medical_terms': {'dementia': 0.8},
+                'stakeholder_roles': {'guardian': 0.9},
+                'care_settings': {'care_facility': 0.7}
+            }
+
+    async def _assess_paper_relevance(self, paper: Dict, search_concepts: Dict[str, float]) -> float:
+        """Assess paper relevance using concepts from AI analysis"""
+        try:
+            title = paper.get('title', '').lower()
+            abstract = paper.get('abstract', '').lower()
+            
+            score = 0.0
+            total_weight = 0.0
+            
+            # Score based on presence of weighted concepts from each category
+            for category in search_concepts.values():
+                for concept, weight in category.items():
+                    total_weight += weight
+                    concept = concept.lower().replace('_', ' ')
+                    if concept in title:
+                        score += weight * 1.5  # Higher weight for title matches
+                    if concept in abstract:
+                        score += weight
+            
+            # Avoid division by zero
+            if total_weight == 0:
+                return 0.0
+            
+            # Normalize score
+            normalized_score = score / (total_weight * 2.5)  # Maximum possible score
+            return min(normalized_score * 10, 10.0)  # Convert to 0-10 scale
+            
+        except Exception as e:
+            logger.error(f"Error assessing paper relevance: {str(e)}")
+            return 0.0
+
+    async def _extract_key_points(self, paper: Dict) -> str:
+        """Extract key ethical points from paper"""
+        try:
+            prompt = f"""Extract the key ethical points from this paper:
+
+Title: {paper['title']}
+Abstract: {paper['abstract']}
+
+Focus on:
+1. Ethical principles discussed
+2. Relevant findings
+3. Practical recommendations
+4. Applicable insights
+
+Return 3-5 key points in bullet form."""
+
+            response = await self._get_gpt_response(prompt)
+            return response.strip()
+        except:
+            return "No key points extracted"
+
+    async def get_relevant_papers(self, query: str, ai_analysis: Dict) -> Dict:
+        """Get relevant papers based on query and AI analysis"""
+        try:
+            # Create prompt for extracting search terms
+            search_terms_prompt = """Extract key medical and ethical terms from this case and analysis. Format the response as a strict JSON object with these categories:
+            {
+                "medical_conditions": [],
+                "treatments": [],
+                "ethical_principles": [],
+                "care_settings": [],
+                "key_issues": []
+            }
+
+            Case:
+            %s
+
+            Analysis:
+            %s
+
+            Return ONLY the JSON object, no other text.""" % (query, ai_analysis.get('summary', ''))
+
+            # Get search terms from GPT
+            response = await self._get_gpt_response(search_terms_prompt)
+            
+            try:
+                # Clean the response to ensure valid JSON
+                cleaned_response = response.strip()
+                if cleaned_response.startswith('```json'):
+                    cleaned_response = cleaned_response[7:]
+                if cleaned_response.endswith('```'):
+                    cleaned_response = cleaned_response[:-3]
+                cleaned_response = cleaned_response.strip()
+                
+                search_terms = json.loads(cleaned_response)
+                
+                # Log search terms in a readable format
+                logger.info("\nExtracted search terms:")
+                logger.info("="*50)
+                for category, terms in search_terms.items():
+                    logger.info(f"\n{category.replace('_', ' ').title()}:")
+                    for term in terms:
+                        logger.info(f"- {term}")
+                logger.info("="*50 + "\n")
+
+                # Search papers using enhanced search
+                papers = await self.ethics_db.search_papers(
+                    query=query,
+                    ai_analysis=ai_analysis,
+                    search_terms=search_terms,
+                    limit=5
+                )
+                
+                # Add search terms to the response
+                return {
+                    'papers': papers,
+                    'search_terms': search_terms
+                }
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Error parsing search terms JSON: {str(e)}\nResponse was: {response}")
+                return {'papers': [], 'search_terms': {}}
+                
+        except Exception as e:
+            logger.error(f"Error getting relevant papers: {str(e)}")
+            return {'papers': [], 'search_terms': {}}
+
+    async def _get_initial_analysis(self, question: str) -> Dict[str, Any]:
+        """Get initial AI analysis of the ethical question"""
+        try:
+            logger.info("\nStarting initial analysis...")
+            
+            ai_prompt = f"""Analyze this medical ethics question and provide a structured response with EXACTLY these sections:
+
+Question: {question}
+
+SUMMARY
+Provide a concise summary of the ethical situation and key principles involved.
+
+RECOMMENDATIONS
+- Provide specific, actionable recommendation based on ethical principles
+- Include at least 3 clear recommendations
+- Support each with ethical reasoning
+
+ETHICAL CONCERNS
+- List specific ethical concerns raised by the situation
+- Include at least 3 major concerns
+- Explain the ethical principles at stake
+
+MITIGATION STRATEGIES
+- Provide practical strategies to address the concerns
+- Include at least 3 specific strategies
+- Explain how each strategy helps
+
+FOLLOW-UP QUESTIONS
+- List key questions to better understand the situation
+- Include at least 3 important questions
+- Focus on gathering relevant ethical information
+
+Use EXACTLY these section headers and bullet points for lists.
+"""
+
+            logger.info("\nSending prompt to GPT...")
+            ai_response = await self._get_gpt_response(ai_prompt)
+            logger.info("\nRaw GPT response:")
+            logger.info(f"{ai_response}")
+            
+            parsed = self.response_parser.parse_gpt_response(ai_response)
+            logger.info("\nParsed response:")
+            logger.info(f"{json.dumps(parsed, indent=2)}")
+            
+            return parsed
+
+        except Exception as e:
+            logger.error("\nError in initial analysis:")
+            logger.error(f"{str(e)}", exc_info=True)
+            return {
+                'summary': 'Error performing initial analysis',
+                'recommendations': [],
+                'concerns': [],
+                'mitigation_strategies': [],
+                'follow_up_questions': []
+            } 

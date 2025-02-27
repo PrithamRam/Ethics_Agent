@@ -1,0 +1,12 @@
+# Elasticsearch Configuration
+HOST=https://localhost:9200
+USERNAME=elastic
+PASSWORD=SVCSjavBl_eJYzpaRu5d
+CA_FINGERPRINT=f5c35dca8f9c4fa32f69e3c53db6bdbcaeb32047e94b8d64462b8ff62221f5b5
+INDEX_NAME=medical_ethics
+
+# Kibana Enrollment Token (valid for 30 minutes from creation)
+KIBANA_TOKEN=eyJ2ZXIiOiI4LjEyLjEiLCJhZHIiOlsiMTAuMTY4LjE2NC4xMTg6OTIwMCJdLCJmZ3IiOiJmNWMzNWRjYThmOWM0ZmEzMmY2OWUzYzUzZGI2YmRiY2FlYjMyMDQ3ZTk0YjhkNjQ0NjJiOGZmNjIyMjFmNWI1Iiwia2V5IjoiMHRNX1FwVUJXZU5HeTB2Qmwzcm46TS1ydkhiQ05Td3lSSVM0SkI4V1JuZyJ9
+
+# Index Mappings (in JSON format)
+MAPPINGS={"mappings":{"properties":{"title":{"type":"text","analyzer":"english"},"abstract":{"type":"text","analyzer":"english"},"journal":{"type":"keyword"},"year":{"type":"integer"},"authors":{"type":"keyword"},"ethical_considerations":{"type":"text","analyzer":"english"}}}} 

@@ -1,10 +1,11 @@
-from typing import Dict, List
+from typing import Dict, List, Any
 import re
 from dataclasses import dataclass
 import logging
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -24,77 +25,65 @@ class ResponseParser:
             raise ValueError("OPENAI_API_KEY not found in environment variables")
         self.client = OpenAI(api_key=self.api_key)
 
-    def parse_gpt_response(self, response_text: str) -> dict:
+    def parse_gpt_response(self, response: str) -> Dict[str, Any]:
         """Parse GPT response into structured format"""
+        logger.info("Starting to parse GPT response...")
+        
+        sections = {
+            'summary': '',
+            'recommendations': [],
+            'concerns': [],
+            'mitigation_strategies': [],
+            'follow_up_questions': []
+        }
+        
         try:
-            # Default structure
-            analysis = {
-                'summary': '',
-                'recommendations': [],
-                'follow_up_questions': [],
-                'concerns': [],
-                'mitigation_strategies': []
-            }
-
-            # If response is just text, use it as summary
-            if not any(marker in response_text.lower() for marker in ['summary:', 'recommendations:', 'follow-up questions:']):
-                analysis['summary'] = response_text.strip()
-                return analysis
-
-            # Split response into sections
-            current_section = 'summary'
-            current_content = []
-
-            for line in response_text.split('\n'):
+            # Split into sections
+            current_section = None
+            current_text = []
+            
+            for line in response.split('\n'):
                 line = line.strip()
-                if not line:
+                if not line or line.startswith('Question:'):
                     continue
-
-                # Check for section headers
-                lower_line = line.lower()
-                if 'summary:' in lower_line:
+                    
+                # Log each line for debugging
+                logger.debug(f"Processing line: {line}")
+                
+                # Check for section headers (exact matches)
+                if line == 'SUMMARY':
                     current_section = 'summary'
                     continue
-                elif any(x in lower_line for x in ['recommendations:', 'key points:', 'recommendations and points:']):
+                elif line == 'RECOMMENDATIONS':
                     current_section = 'recommendations'
                     continue
-                elif any(x in lower_line for x in ['follow-up questions:', 'additional questions:', 'further questions:']):
-                    current_section = 'follow_up_questions'
-                    continue
-                elif 'concerns:' in lower_line:
+                elif line == 'ETHICAL CONCERNS':
                     current_section = 'concerns'
                     continue
-                elif 'mitigation strategies:' in lower_line:
+                elif line == 'MITIGATION STRATEGIES':
                     current_section = 'mitigation_strategies'
                     continue
-
-                # Remove list markers and clean the line
-                cleaned_line = line.lstrip('•-*1234567890. ')
-                if cleaned_line:
+                elif line == 'FOLLOW-UP QUESTIONS':
+                    current_section = 'follow_up_questions'
+                    continue
+                
+                # Add content to current section
+                if current_section:
                     if current_section == 'summary':
-                        if analysis['summary']:
-                            analysis['summary'] += ' ' + cleaned_line
-                        else:
-                            analysis['summary'] = cleaned_line
-                    else:
-                        analysis[current_section].append(cleaned_line)
-
-            # Ensure we have at least a summary if nothing was parsed
-            if not any(analysis.values()):
-                analysis['summary'] = response_text.strip()
-
-            return analysis
-
+                        current_text.append(line)
+                    elif line.startswith('- '):
+                        sections[current_section].append(line[2:].strip())
+            
+            # Save summary text
+            if current_text:
+                sections['summary'] = ' '.join(current_text)
+            
+            logger.info(f"Final parsed sections: {json.dumps(sections, indent=2)}")
+            return sections
+            
         except Exception as e:
-            logger.error(f"Error parsing GPT response: {str(e)}")
-            # Return raw response as summary if parsing fails
-            return {
-                'summary': response_text.strip(),
-                'recommendations': [],
-                'follow_up_questions': [],
-                'concerns': [],
-                'mitigation_strategies': []
-            }
+            logger.error(f"Error parsing GPT response: {str(e)}", exc_info=True)
+            return sections
     
     def _split_into_sections(self, response: str) -> Dict[str, List[str]]:
         """Split response into different sections"""
@@ -279,50 +268,51 @@ class ResponseParser:
         
         return response.choices[0].message.content
 
-    def _format_papers_context(self, papers: List[Dict]) -> str:
-        """Format papers into a readable context string"""
-        context = []
-        for i, paper in enumerate(papers, 1):
-            context.append(f"""Paper {i}:
-Title: {paper['title']}
-Year: {paper.get('year', 'N/A')}
-Abstract: {paper['abstract']}
-Ethical Considerations: {', '.join(paper.get('ethical_considerations', []) or ['None specified'])}
----""")
-        
-        return "\n\n".join(context)
-
     def _generate_papers_response(self, question: str, papers: List[Dict]) -> str:
-        """Generate response based on papers"""
+        """Generate literature-based analysis with strict paper references"""
         try:
-            # Format papers into context
+            if not papers:
+                return """No directly relevant papers were found in the literature search. 
+                A broader search or consultation with medical ethics experts is recommended."""
+            
+            # Format papers into context with limit
             context = self._format_papers_context(papers)
             
-            prompt = f"""Based on the following research papers, answer this question: {question}
+            prompt = f"""Analyze these specific papers in relation to the case. 
+            ONLY use information explicitly stated in these papers.
+            If there isn't clear guidance from these papers, say so.
 
-Research papers:
+Case:
+{question}
+
+Available Papers:
 {context}
 
-Please provide a comprehensive analysis that:
-1. Directly addresses the question
-2. Cites specific papers when making claims
-3. Acknowledges any limitations or uncertainties
-4. Considers ethical implications
+Please provide:
+1. Evidence Summary:
+   - What specific guidance exists in these papers
+   - ONLY cite information actually present in the papers
+   - Clearly indicate if certain aspects aren't addressed
 
-Structure your response with:
-- Summary of key findings
-- Ethical considerations
-- Relevant precedents
-- Practical recommendations
-"""
+2. Strength of Evidence:
+   - How directly relevant are these papers
+   - Note any limitations in applying their guidance
+   - Identify gaps in the available evidence
+
+3. Synthesis:
+   - Only combine guidance that's explicitly in these papers
+   - Don't extrapolate beyond what's stated
+   - Clearly indicate when more evidence would be needed
+
+Important: Do NOT make assumptions or add information not found in these specific papers."""
 
             response = self.client.chat.completions.create(
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are an expert in medical ethics, providing evidence-based answers using academic research."},
+                    {"role": "system", "content": "You are a medical ethics expert. Be precise and only reference the provided papers. Do not make assumptions."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.3,  # Lower temperature for more conservative responses
                 max_tokens=1000
             )
             
@@ -330,4 +320,118 @@ Structure your response with:
             
         except Exception as e:
             logger.error(f"Error generating papers response: {str(e)}")
-            return f"Error analyzing papers: {str(e)}" 
+            return "Error analyzing papers. Please review the papers directly."
+
+    def _format_papers_context(self, papers: List[Dict]) -> str:
+        """Format papers with clear identification"""
+        context = []
+        total_chars = 0
+        char_limit = 6000
+        
+        for i, paper in enumerate(papers, 1):
+            summary = f"""Paper {i}:
+Title: {paper.get('title', 'No title')}
+Authors: {', '.join(f"{a.get('last_name', '')}" for a in paper.get('authors', []))}
+Year: {paper.get('year', 'Year not specified')}
+Abstract: {paper.get('abstract', 'No abstract available')}
+Key Points: {', '.join(paper.get('ethical_considerations', ['None specified']))}
+PMID: {paper.get('pubmed_id', 'No ID')}
+---"""
+            
+            if total_chars + len(summary) > char_limit:
+                break
+            context.append(summary)
+            total_chars += len(summary)
+        
+        if not context:
+            return "No papers available for analysis."
+        
+        return "\n\n".join(context)
+
+    def _assess_relevance(self, paper: Dict) -> str:
+        """Assess conceptual relevance rather than keyword matching"""
+        try:
+            # Create a summary of the paper's ethical content
+            content = f"""
+            Title: {paper.get('title', '')}
+            Abstract: {paper.get('abstract', '')}
+            Ethical Points: {', '.join(paper.get('ethical_considerations', []))}
+            """
+            
+            # Analyze conceptual relevance
+            prompt = f"""Rate this paper's relevance to ethical principles of:
+            - Stakeholder relationships
+            - Core ethical principles
+            - Type of ethical dilemma
+            
+            Paper content:
+            {content}
+            
+            Return only: "direct", "conceptual", or "general"
+            """
+            
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[
+                    {"role": "system", "content": "You are an expert at identifying ethical relevance. Be concise."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=10
+            )
+            
+            return response.choices[0].message.content.strip().lower()
+            
+        except Exception as e:
+            logger.error(f"Error assessing relevance: {str(e)}")
+            return "general"
+
+    def _create_detailed_summary(self, paper: Dict) -> str:
+        """Create detailed summary focusing on ethical principles"""
+        return f"""Paper: {paper['title']}
+Key Ethical Principles: {', '.join(paper.get('ethical_considerations', ['None specified']))}
+Relevant Guidance: {self._extract_main_guidance(paper)}
+Application: {self._suggest_principle_application(paper)}
+---"""
+
+    def _suggest_principle_application(self, paper: Dict) -> str:
+        """Suggest how paper's principles might apply to other contexts"""
+        abstract = paper.get('abstract', '')
+        if not abstract:
+            return "No application specified"
+        
+        # Look for transferable principles
+        principle_indicators = [
+            "principle", "framework", "approach", "consideration",
+            "balance", "value", "right", "obligation"
+        ]
+        
+        relevant_parts = []
+        for sentence in abstract.split('. '):
+            if any(indicator in sentence.lower() for indicator in principle_indicators):
+                relevant_parts.append(sentence)
+        
+        if relevant_parts:
+            return '. '.join(relevant_parts)
+        return "No explicit principles found"
+
+    def _extract_main_guidance(self, paper: Dict) -> str:
+        """Extract main ethical guidance from paper"""
+        abstract = paper.get('abstract', '')
+        if not abstract:
+            return "No guidance specified"
+        
+        # Look for recommendation/guidance sections
+        guidance_indicators = [
+            "recommend", "suggest", "conclude", "propose",
+            "should", "must", "guideline", "principle"
+        ]
+        
+        relevant_sentences = []
+        for sentence in abstract.split('. '):
+            if any(indicator in sentence.lower() for indicator in guidance_indicators):
+                relevant_sentences.append(sentence)
+        
+        if relevant_sentences:
+            return '. '.join(relevant_sentences)
+        return "No explicit guidance found" 

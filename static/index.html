@@ -3,188 +3,329 @@
 <head>
     <title>Medical Ethics Assistant</title>
     <style>
-    * {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    }
+        body {
+            font-family: -apple-system, system-ui, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+            color: #333;
+            background: #f7f9fc;
+        }
 
-    .container {
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 0 20px;
-        width: 100%;
-        box-sizing: border-box;
-    }
+        .query-box {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 30px;
+        }
 
-    .description {
-        font-size: 0.9em;
-        color: #666;
-        margin: 1em 0 2em 0;
-        line-height: 1.6;
-    }
+        textarea {
+            width: 100%;
+            height: 120px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-size: 16px;
+            margin-bottom: 15px;
+            resize: vertical;
+        }
 
-    .query-section {
-        margin: 2em 0;
-    }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
 
-    textarea {
-        width: 100%;
-        min-height: 150px;
-        padding: 1em;
-        margin-bottom: 1em;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        background-color: #f8f9fa;
-        font-family: inherit;
-    }
+        button:hover { background: #1d4ed8; }
+        button:disabled { background: #93c5fd; cursor: not-allowed; }
 
-    textarea::placeholder {
-        color: #666;
-    }
+        .results {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
 
-    button {
-        padding: 0.5em 1em;
-        background: #007bff;
-        color: white;
-        border: none;
-        border-radius: 4px;
-        cursor: pointer;
-        font-family: inherit;
-    }
+        .panel {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
 
-    /* Analysis sections */
-    .analysis-section {
-        margin: 1em 0;
-        padding: 1.5em;
-        background: #f8f9fa;
-        border-radius: 8px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        width: 100%;
-        box-sizing: border-box;
-    }
+        h1 { color: #1e293b; margin-top: 0; }
+        h2 { color: #334155; margin-top: 0; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+        h3 { color: #475569; margin: 20px 0 10px; }
 
-    /* Content within analysis sections */
-    .section-content {
-        width: 100%;
-        box-sizing: border-box;
-    }
+        ul {
+            margin: 0;
+            padding-left: 20px;
+        }
 
-    /* Text formatting */
-    .section-content p {
-        margin: 1em 0;
-        white-space: normal;
-        word-wrap: break-word;
-        overflow-wrap: break-word;
-        line-height: 1.6;
-    }
+        li {
+            margin: 8px 0;
+            line-height: 1.5;
+        }
 
-    .paper {
-        margin: 1em 0;
-        padding: 1.5em;
-        border: 1px solid #e9ecef;
-        border-radius: 8px;
-        background: white;
-    }
+        .paper {
+            background: #f8fafc;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
 
-    .paper h4 {
-        color: #2c3e50;
-        margin-top: 0;
-    }
+        .paper h4 {
+            margin: 0 0 10px;
+            color: #2563eb;
+        }
 
-    .paper p {
-        margin: 0.5em 0;
-    }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+            display: none;
+        }
 
-    .paper strong {
-        color: #495057;
-    }
+        .error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .loading {
+            background: #e0f2fe;
+            color: #075985;
+        }
+
+        .search-terms {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .term-category {
+            margin-bottom: 15px;
+        }
+
+        .term-category h4 {
+            color: #2563eb;
+            margin-bottom: 5px;
+        }
+
+        .term-category ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .term-category li {
+            color: #4b5563;
+        }
+
+        .terms-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .term-category {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .term-category h3 {
+            color: #2563eb;
+            margin: 0 0 10px 0;
+            font-size: 1.1em;
+        }
+
+        .term-category ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .term-category li {
+            color: #4b5563;
+            margin: 5px 0;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
+    <div class="query-box">
         <h1>Medical Ethics Assistant</h1>
-        
-        <div class="description">
-            This is a tool to analyse your query in light of about 100,000 publications from PubMed. 
-            The results are provided in three sections: an OpenAI based analysis leveraging the large 
-            language model's training data, selected 10 references and abstracts for further consideration, 
-            and an analysis based on the selected references. Please note that this is an experimental tool. 
-            Please hit refresh on your browser to start a new query.
-        </div>
-        
-        <div class="query-section">
-            <form id="query-form">
-                <textarea id="query" 
-                    placeholder="Enter your biomedical ethics query, case study or potential situation in this space"></textarea>
-                <button type="submit">Submit Query</button>
-            </form>
-        </div>
+        <textarea id="query" placeholder="Enter your medical ethics question here..."></textarea>
+        <button id="submitBtn" onclick="submitQuery()">Analyze Query</button>
+        <div id="loading" class="status loading">Analyzing your query...</div>
+        <div id="error" class="status error"></div>
+    </div>
 
-        <div id="response">
-            <h3>AI Analysis</h3>
-            <div id="general-analysis" class="analysis-section">
-                <div class="section-content"></div>
+    <div class="results-container">
+        <div class="results">
+            <div class="panel">
+                <h2>AI Analysis</h2>
+                <section>
+                    <h3>Summary</h3>
+                    <div id="summary"></div>
+                </section>
+                <section>
+                    <h3>Recommendations</h3>
+                    <ul id="recommendations"></ul>
+                </section>
+                <section>
+                    <h3>Ethical Concerns</h3>
+                    <ul id="concerns"></ul>
+                </section>
+                <section>
+                    <h3>Mitigation Strategies</h3>
+                    <ul id="strategies"></ul>
+                </section>
+                <section>
+                    <h3>Follow-up Questions</h3>
+                    <ul id="questions"></ul>
+                </section>
             </div>
-            
-            <h3>Relevant Papers</h3>
-            <div id="papers" class="papers-section"></div>
-            
-            <h3>Literature Analysis</h3>
-            <div id="literature-analysis" class="analysis-section"></div>
+
+            <div class="panel">
+                <h2>Literature Analysis</h2>
+                <div id="litAnalysis"></div>
+                <h3>Relevant Papers</h3>
+                <div id="papers"></div>
+            </div>
+
+            <div id="searchTerms"></div>
         </div>
     </div>
 
     <script>
-        document.getElementById('query-form').onsubmit = async function(e) {
-            e.preventDefault();
+        async function submitQuery() {
+            const button = document.getElementById('submitBtn');
+            const loading = document.getElementById('loading');
+            const error = document.getElementById('error');
             
-            const response = await fetch('/api/ethical-guidance', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    text: document.getElementById('query').value,
-                    max_results: 10
-                })
-            });
-            
-            const data = await response.json();
-            displayResponse(data);
-        };
+            try {
+                const query = document.getElementById('query').value.trim();
+                if (!query) {
+                    throw new Error('Please enter a query');
+                }
 
-        function displayResponse(response) {
-            // Format AI analysis first
-            const aiAnalysis = response.general_analysis
-                .split('\n\n')
-                .filter(para => para.trim())
-                .map(para => `<p>${para.trim()}</p>`)
-                .join('');
+                // Reset UI
+                error.style.display = 'none';
+                button.disabled = true;
+                loading.style.display = 'block';
+                clearResults();
+
+                console.log('Submitting query:', query);
+                const response = await fetch('/api/ethical-guidance', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ text: query })
+                });
+
+                const data = await response.json();
+                console.log('Received response:', data);
+
+                if (data.status === 'success' && data.data) {
+                    displayResults(data.data);
+                } else {
+                    throw new Error(data.error || 'Failed to analyze query');
+                }
+
+            } catch (err) {
+                console.error('Error:', err);
+                error.textContent = err.message;
+                error.style.display = 'block';
+            } finally {
+                button.disabled = false;
+                loading.style.display = 'none';
+            }
+        }
+
+        function clearResults() {
+            ['summary', 'recommendations', 'concerns', 'strategies', 
+             'questions', 'litAnalysis', 'papers'].forEach(id => {
+                document.getElementById(id).innerHTML = '';
+            });
+        }
+
+        function displayResults(data) {
+            // Display AI Analysis
+            const ai = data.ai_analysis;
+            document.getElementById('summary').textContent = ai.summary || 'No summary available';
             
-            document.querySelector('#general-analysis .section-content').innerHTML = aiAnalysis;
-            
-            // Format papers next
-            const papersList = document.getElementById('papers');
-            papersList.innerHTML = response.papers.map(paper => `
-                <div class="paper">
-                    <h4>${paper.title}</h4>
-                    <p><strong>Year:</strong> ${paper.year || 'N/A'}</p>
-                    <p><strong>Abstract:</strong> ${paper.abstract}</p>
-                    <p><strong>Ethical Considerations:</strong> 
-                        ${paper.ethical_considerations.length ? 
-                            paper.ethical_considerations.join(', ') : 
-                            'None specified'}
-                    </p>
-                </div>
-            `).join('');
-            
-            // Format literature analysis last
-            const litAnalysis = response.literature_analysis
-                .split('\n\n')
-                .map(para => `<p>${para.trim()}</p>`)
-                .join('');
-            
-            document.getElementById('literature-analysis').innerHTML = 
-                `<div class="section-content">${litAnalysis}</div>`;
+            ['recommendations', 'concerns', 'mitigation_strategies', 'follow_up_questions'].forEach(key => {
+                const items = ai[key] || [];
+                const element = document.getElementById(key === 'mitigation_strategies' ? 'strategies' : 
+                                                     key === 'follow_up_questions' ? 'questions' : key);
+                element.innerHTML = items.length ? 
+                    items.map(item => `<li>${item}</li>`).join('') :
+                    '<li>No items available</li>';
+            });
+
+            // Display Literature Analysis and Papers
+            const litAnalysisDiv = document.getElementById('litAnalysis');
+            const papersDiv = document.getElementById('papers');
+
+            if (data.relevant_papers?.length) {
+                // Display literature analysis only if we have papers
+                litAnalysisDiv.innerHTML = 
+                    (data.literature_analysis || 'No literature analysis available')
+                        .split('\n')
+                        .map(p => p.trim() ? `<p>${p}</p>` : '')
+                        .join('');
+
+                // Display papers
+                papersDiv.innerHTML = data.relevant_papers.map(paper => `
+                    <div class="paper">
+                        <h4>${paper.title}</h4>
+                        <p><strong>Authors:</strong> ${paper.authors?.map(a => a.last_name).join(', ') || 'N/A'} (${paper.year || 'N/A'})</p>
+                        <p><strong>Journal:</strong> ${paper.journal || 'N/A'}</p>
+                        ${paper.abstract ? `<p><strong>Abstract:</strong> ${paper.abstract}</p>` : ''}
+                        ${paper.ethical_considerations?.length ?
+                            `<p><strong>Ethical Considerations:</strong> ${paper.ethical_considerations.join(', ')}</p>` :
+                            ''}
+                        ${paper.score ? `<p><strong>Relevance Score:</strong> ${paper.score.toFixed(2)}</p>` : ''}
+                    </div>
+                `).join('');
+            } else {
+                // If no papers found, show appropriate message in both sections
+                litAnalysisDiv.innerHTML = '<p>No literature analysis available - no relevant papers found in database.</p>';
+                papersDiv.innerHTML = '<p>No relevant papers found in database.</p>';
+            }
+
+            // Display Search Terms
+            const searchTermsDiv = document.getElementById('searchTerms');
+            if (data.search_terms && Object.keys(data.search_terms).length > 0) {
+                let searchTermsHtml = `
+                    <div class="panel search-terms">
+                        <h2>Search Terms Used</h2>
+                        <div class="terms-grid">`;
+                
+                for (const [category, terms] of Object.entries(data.search_terms)) {
+                    if (terms && terms.length > 0) {
+                        searchTermsHtml += `
+                            <div class="term-category">
+                                <h3>${category.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</h3>
+                                <ul>
+                                    ${terms.map(term => `<li>${term}</li>`).join('')}
+                                </ul>
+                            </div>`;
+                    }
+                }
+                
+                searchTermsHtml += `
+                    </div>
+                </div>`;
+                searchTermsDiv.innerHTML = searchTermsHtml;
+            }
         }
     </script>
 </body>

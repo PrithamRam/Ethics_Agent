@@ -4,309 +4,333 @@ import json
 import logging
 from pathlib import Path
 import re
+import os
+from dotenv import load_dotenv
+from openai import OpenAI
+import aiosqlite
+import asyncio
 
 logger = logging.getLogger(__name__)
 
 class EthicsDatabase:
-    # Add stop_words as a class variable
-    stop_words = {
-        'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 
-        'has', 'he', 'in', 'is', 'it', 'its', 'of', 'on', 'that', 'the', 
-        'to', 'was', 'were', 'will', 'with', 'what', 'when', 'where', 
-        'who', 'why', 'how', 'after', 'before', 'during', 'these', 'those',
-        'this', 'there', 'here', 'have', 'had', 'been', 'would', 'should',
-        'could', 'may', 'might', 'must', 'shall', 'we', 'our', 'ours', 'us',
-        'they', 'them', 'their', 'theirs', 'do', 'does', 'did', 'doing',
-        'get', 'gets', 'got', 'than', 'then', 'need', 'needs', 'into'
-    }
+    def __init__(self):
+        self.db_path = "ethics.db"
+        self.conn = None
+        
+        # Initialize OpenAI client
+        load_dotenv()
+        openai_key = os.getenv('OPENAI_API_KEY')
+        if not openai_key:
+            raise ValueError("OPENAI_API_KEY not found in environment variables")
+        self.client = OpenAI(api_key=openai_key)
 
-    def __init__(self, db_path: str = "ethics.db"):
-        self.db_path = db_path
-        self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
-
-    def setup_database(self):
-        """Create the necessary tables if they don't exist"""
-        cursor = self.conn.cursor()
-        
-        # Drop existing tables if they exist
-        cursor.execute("DROP TABLE IF EXISTS ref_entries")
-        cursor.execute("DROP TABLE IF EXISTS ref_entries_fts")
-        cursor.execute("DROP TABLE IF EXISTS ethical_principles")
-        cursor.execute("DROP TABLE IF EXISTS keywords")
-        cursor.execute("DROP TABLE IF EXISTS ethical_considerations")
-        cursor.execute("DROP TABLE IF EXISTS papers")
-        
-        # Create papers table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS papers (
-                pubmed_id TEXT PRIMARY KEY,
-                title TEXT,
-                abstract TEXT,
-                year INTEGER,
-                journal TEXT
-            )
-        """)
-        
-        # Create keywords table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS keywords (
-                paper_id TEXT,
-                keyword TEXT,
-                FOREIGN KEY(paper_id) REFERENCES papers(pubmed_id)
-            )
-        """)
-        
-        # Create ethical_considerations table
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS ethical_considerations (
-                paper_id TEXT,
-                consideration TEXT,
-                FOREIGN KEY(paper_id) REFERENCES papers(pubmed_id)
-            )
-        """)
-        
-        # Add FTS5 virtual table for full-text search
-        cursor.execute("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS papers_fts USING fts5(
-                pubmed_id UNINDEXED,
-                title,
-                abstract,
-                year UNINDEXED,
-                journal,
-                content='papers',
-                content_rowid='rowid'
-            )
-        """)
-        
-        self.conn.commit()
-
-    def add_paper(self, **kwargs):
-        """Add a paper and its associated data to the database"""
-        cursor = self.conn.cursor()
-        
+    async def get_connection(self):
+        """Get or create a database connection"""
         try:
-            # Extract fields from kwargs
-            pubmed_id = kwargs.get('pubmed_id')
-            title = kwargs.get('title')
-            abstract = kwargs.get('abstract')
-            year = kwargs.get('year')
-            journal = kwargs.get('journal')
-            keywords = kwargs.get('keywords', [])
-            ethical_considerations = kwargs.get('ethical_considerations', [])
-            
-            # Insert paper into main table
-            cursor.execute("""
-                INSERT OR REPLACE INTO papers (pubmed_id, title, abstract, year, journal)
-                VALUES (?, ?, ?, ?, ?)
-            """, (pubmed_id, title, abstract, year, journal))
-            
-            # Insert into FTS table
-            cursor.execute("""
-                INSERT OR REPLACE INTO papers_fts (pubmed_id, title, abstract, year, journal)
-                VALUES (?, ?, ?, ?, ?)
-            """, (pubmed_id, title, abstract, year, journal))
-            
-            # Clear existing keywords and considerations
-            cursor.execute("DELETE FROM keywords WHERE paper_id = ?", (pubmed_id,))
-            cursor.execute("DELETE FROM ethical_considerations WHERE paper_id = ?", (pubmed_id,))
-            
-            # Insert keywords if any
-            if keywords:
-                cursor.executemany("""
-                    INSERT INTO keywords (paper_id, keyword)
-                    VALUES (?, ?)
-                """, [(pubmed_id, kw) for kw in keywords])
-            
-            # Insert ethical considerations if any
-            if ethical_considerations:
-                cursor.executemany("""
-                    INSERT INTO ethical_considerations (paper_id, consideration)
-                    VALUES (?, ?)
-                """, [(pubmed_id, ec) for ec in ethical_considerations])
-            
-            self.conn.commit()
-            
+            if not self.conn:
+                self.conn = await aiosqlite.connect(self.db_path)
+                # Set row factory to return dictionary-like objects
+                self.conn.row_factory = aiosqlite.Row
+                await self._setup_database()
+                # Initialize with some papers if empty
+                await self._initialize_with_papers()
+            return self.conn
         except Exception as e:
-            logger.error(f"Error adding paper {kwargs.get('pubmed_id')}: {str(e)}")
-            self.conn.rollback()
+            logger.error(f"Error getting database connection: {str(e)}")
+            raise
 
-    def search_papers(self, query: str, limit: int = 10) -> List[Dict]:
-        """Enhanced search with FTS5 and intelligent term extraction"""
-        try:
-            cursor = self.conn.cursor()
-            
-            # Extract key terms using GPT
-            search_terms = self._extract_search_terms(query)
-            
-            # Build FTS query with extracted terms
-            fts_query = ' OR '.join(f'"{term}"*{weight}' for term, weight in search_terms)
-            
-            sql = """
-                WITH scored_papers AS (
-                    SELECT 
-                        p.*,
-                        rank * -1 as relevance_score,  -- Convert rank to positive score
-                        GROUP_CONCAT(DISTINCT k.keyword) as keywords,
-                        GROUP_CONCAT(DISTINCT e.consideration) as ethical_considerations
-                    FROM papers_fts p
-                    LEFT JOIN keywords k ON p.pubmed_id = k.paper_id
-                    LEFT JOIN ethical_considerations e ON p.pubmed_id = e.paper_id
-                    WHERE papers_fts MATCH ?
-                    GROUP BY p.pubmed_id
+    async def _setup_database(self):
+        """Set up database tables"""
+        async with self.conn.cursor() as cursor:
+            # Create papers table with all needed columns
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS papers (
+                    pubmed_id TEXT PRIMARY KEY,
+                    title TEXT,
+                    abstract TEXT,
+                    journal TEXT,
+                    year INTEGER,
+                    relevance_score REAL
                 )
-                SELECT *,
-                    CASE 
-                        WHEN title LIKE ? THEN relevance_score * 2
-                        WHEN abstract LIKE ? THEN relevance_score * 1.5
-                        ELSE relevance_score
-                    END as final_score
-                FROM scored_papers
-                ORDER BY final_score DESC, year DESC
-                LIMIT ?
-            """
+            """)
             
-            params = [
-                fts_query,
-                f"%{query}%",
-                f"%{query}%",
-                limit
-            ]
+            # Create or recreate FTS table
+            await cursor.execute("DROP TABLE IF EXISTS papers_fts")
+            await cursor.execute("""
+                CREATE VIRTUAL TABLE papers_fts USING fts5(
+                    title,
+                    abstract,
+                    journal,
+                    content='papers',
+                    content_rowid='rowid',
+                    tokenize='porter unicode61'
+                )
+            """)
             
-            logger.info(f"Searching with FTS query: {fts_query}")
-            cursor.execute(sql, params)
-            
-            results = []
-            for row in cursor.fetchall():
-                paper = dict(row)
-                paper['keywords'] = paper['keywords'].split(',') if paper['keywords'] else []
-                paper['ethical_considerations'] = paper['ethical_considerations'].split(',') if paper['ethical_considerations'] else []
-                paper['relevance_score'] = paper['final_score']
-                results.append(paper)
-                logger.info(f"Found paper: {paper['title']} (score: {paper['relevance_score']})")
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error searching papers: {str(e)}")
-            return []
+            await self.conn.commit()
+            logger.info("Database tables set up successfully")
 
-    def _extract_search_terms(self, query: str) -> List[Tuple[str, int]]:
-        """Use GPT to extract and weight search terms"""
+    async def _initialize_with_papers(self):
+        """Initialize database with papers"""
         try:
-            prompt = f"""Analyze this medical ethics query and extract key search terms:
-            "{query}"
+            conn = await self.get_connection()
+            cursor = conn.cursor()
             
-            1. Identify main concepts and their synonyms
-            2. Include both specific terms and broader ethical concepts
-            3. Consider medical terminology and ethical principles
-            4. Return terms in order of relevance (most important first)
+            # Create tables if they don't exist
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS papers (
+                    pubmed_id TEXT PRIMARY KEY,
+                    title TEXT,
+                    abstract TEXT,
+                    journal TEXT,
+                    year INTEGER,
+                    relevance_score REAL
+                )
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS ethical_considerations (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    paper_id TEXT,
+                    consideration TEXT,
+                    FOREIGN KEY (paper_id) REFERENCES papers (pubmed_id)
+                )
+            """)
+
+            # Add indexes for better search performance
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_title ON papers(title)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_abstract ON papers(abstract)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_considerations ON ethical_considerations(consideration)")
+
+            conn.commit()
+            logger.info("Database tables set up successfully")
             
-            Format each term as: term (weight 1-3)
-            Example: ethics (3), consent (2), treatment (1)"""
-            
-            response = self.client.chat.completions.create(
+            return True
+        except Exception as e:
+            logger.error(f"Error initializing database: {str(e)}")
+            return False
+
+    async def _extract_search_terms(self, query: str) -> List[str]:
+        """Extract key ethical and medical concepts from the query using GPT"""
+        try:
+            prompt = f"""Analyze this medical ethics case and extract key search terms.
+            Focus on ethical principles, medical conditions, and relationships.
+            Return ONLY a JSON array of search terms, nothing else.
+
+Case:
+{query}
+
+Example response format:
+["patient confidentiality", "HIV disclosure", "partner notification"]"""
+
+            response = await asyncio.to_thread(
+                self.client.chat.completions.create,
                 model="gpt-4",
                 messages=[
-                    {"role": "system", "content": "You are a medical ethics expert helping to identify key search terms."},
+                    {"role": "system", "content": "You are a medical ethics expert. Return ONLY a JSON array of search terms."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.3,
                 max_tokens=200
             )
             
-            # Parse response into terms and weights
-            terms_text = response.choices[0].message.content
-            terms = []
-            for match in re.finditer(r'(\w+)\s*\((\d)\)', terms_text):
-                term, weight = match.groups()
-                terms.append((term.lower(), int(weight)))
+            # Clean the response content
+            content = response.choices[0].message.content.strip()
+            if not content.startswith('[') or not content.endswith(']'):
+                logger.warning(f"Unexpected GPT response format: {content}")
+                return self._basic_term_extraction(query)
             
-            # Add any exact phrases from query that contain key terms
-            phrases = re.findall(r'"([^"]+)"', query)
-            for phrase in phrases:
-                if any(term[0] in phrase.lower() for term in terms):
-                    terms.append((phrase.lower(), 3))
-            
+            terms = json.loads(content)
+            logger.info(f"Successfully extracted {len(terms)} search terms")
             return terms
             
+        except json.JSONDecodeError as e:
+            logger.error(f"JSON parsing error: {str(e)}")
+            return self._basic_term_extraction(query)
         except Exception as e:
             logger.error(f"Error extracting search terms: {str(e)}")
-            # Fallback to basic term extraction
-            words = query.lower().split()
-            return [(w, 1) for w in words if w not in self.stop_words and len(w) > 3]
+            return self._basic_term_extraction(query)
+
+    def _basic_term_extraction(self, query: str) -> List[str]:
+        """Basic term extraction as fallback"""
+        # Extract key medical and ethical terms
+        key_terms = set()
+        
+        # Common medical ethics terms
+        important_terms = {
+            "ethics", "ethical", "consent", "confidential", "privacy",
+            "autonomy", "beneficence", "justice", "rights", "dignity",
+            "liability", "legal", "obligation", "duty", "care",
+            "treatment", "medical", "clinical", "patient", "doctor",
+            "hospital", "health", "risk", "harm", "benefit"
+        }
+        
+        # Clean and split query
+        words = re.findall(r'\w+', query.lower())
+        
+        # Find important single words
+        key_terms.update(word for word in words if word in important_terms)
+        
+        # Find important phrases
+        text = query.lower()
+        phrases = [
+            "informed consent", "patient autonomy", "medical ethics",
+            "end of life", "quality of life", "standard of care",
+            "best interest", "medical decision", "clinical judgment"
+        ]
+        key_terms.update(phrase for phrase in phrases if phrase in text)
+        
+        return list(key_terms) if key_terms else ["medical ethics"]
+
+    async def search_papers(self, query: str, limit: int = 10) -> List[Dict]:
+        """Search papers using extracted terms"""
+        try:
+            # Extract search terms
+            search_terms = await self._extract_search_terms(query)
+            if not search_terms:
+                logger.warning("No search terms extracted")
+                return []
+            
+            # Build search query
+            fts_query = self._build_simple_query(search_terms)
+            logger.info(f"Searching with query: {fts_query}")
+            
+            # Get database connection
+            conn = await self.get_connection()
+            
+            # Execute search with broader matching
+            async with conn.cursor() as cursor:
+                await cursor.execute("""
+                    WITH matching_papers AS (
+                        SELECT papers.rowid, papers.pubmed_id, papers.title, papers.abstract, 
+                               papers.journal, papers.year
+                        FROM papers
+                        JOIN papers_fts ON papers.rowid = papers_fts.rowid
+                        WHERE papers_fts MATCH ?
+                    )
+                    SELECT p.pubmed_id, p.title, p.abstract, p.journal, p.year,
+                        CASE 
+                            WHEN lower(p.title) LIKE '%ethic%' OR
+                                 lower(p.title) LIKE '%dementia%' OR
+                                 lower(p.title) LIKE '%care%' THEN 3
+                            WHEN lower(p.journal) LIKE '%ethic%' THEN 2
+                            WHEN lower(p.abstract) LIKE '%ethic%' OR
+                                 lower(p.abstract) LIKE '%dementia%' OR
+                                 lower(p.abstract) LIKE '%care%' THEN 1
+                            ELSE 0
+                        END as relevance
+                    FROM matching_papers p
+                    UNION
+                    SELECT p.pubmed_id, p.title, p.abstract, p.journal, p.year,
+                        CASE 
+                            WHEN lower(p.title) LIKE '%ethic%' OR
+                                 lower(p.title) LIKE '%dementia%' OR
+                                 lower(p.title) LIKE '%care%' THEN 3
+                            WHEN lower(p.journal) LIKE '%ethic%' THEN 2
+                            WHEN lower(p.abstract) LIKE '%ethic%' OR
+                                 lower(p.abstract) LIKE '%dementia%' OR
+                                 lower(p.abstract) LIKE '%care%' THEN 1
+                            ELSE 0
+                        END as relevance
+                    FROM papers p
+                    WHERE lower(p.title) LIKE '%dementia%'
+                       OR lower(p.title) LIKE '%care%'
+                       OR lower(p.abstract) LIKE '%dementia%'
+                       OR lower(p.abstract) LIKE '%care%'
+                    ORDER BY relevance DESC, year DESC
+                    LIMIT ?
+                """, (fts_query, limit))
+                
+                rows = await cursor.fetchall()
+                results = []
+                for row in rows:
+                    results.append({
+                        'title': row['title'],
+                        'abstract': row['abstract'],
+                        'journal': row['journal'],
+                        'year': row['year'],
+                        'relevance': row['relevance'],
+                        'pubmed_id': row['pubmed_id']
+                    })
+                
+                logger.info(f"\nFound {len(results)} matching papers")
+                if results:
+                    logger.info("\nFirst matching paper:")
+                    logger.info(f"Title: {results[0]['title']}")
+                    logger.info(f"Journal: {results[0]['journal']}")
+                    logger.info(f"Year: {results[0]['year']}")
+                    logger.info(f"Relevance: {results[0]['relevance']}")
+                
+                return results
+            
+        except Exception as e:
+            logger.error(f"Error searching papers: {str(e)}")
+            return []
+
+    def _build_simple_query(self, terms: List[str]) -> str:
+        """Build simple FTS query"""
+        query_parts = []
+        for term in terms:
+            clean_term = term.strip().lower()
+            clean_term = re.sub(r'[^\w\s]', ' ', clean_term).strip()
+            
+            if not clean_term:
+                continue
+            
+            if ' ' in clean_term:
+                query_parts.append(f'"{clean_term}"')  # Exact phrase
+            else:
+                query_parts.append(clean_term)  # Single word
+        
+        return ' OR '.join(query_parts)
 
     def close(self):
         """Close the database connection"""
         self.conn.close()
 
     def rebuild_fts_index(self):
-        """Rebuild the FTS index from papers table"""
-        cursor = self.conn.cursor()
+        """Rebuild the FTS index"""
         try:
-            # Clear FTS table
-            cursor.execute("DELETE FROM papers_fts")
+            cursor = self.conn.cursor()
+            logger.info("Starting FTS index rebuild...")
             
-            # Copy data from papers table
+            # Insert all papers into FTS
             cursor.execute("""
-                INSERT INTO papers_fts (pubmed_id, title, abstract, year, journal)
-                SELECT pubmed_id, title, abstract, year, journal FROM papers
+                INSERT INTO papers_fts(rowid, title, abstract, journal)
+                SELECT rowid,
+                       title,
+                       abstract,
+                       journal
+                FROM papers
             """)
             
             self.conn.commit()
-            logger.info("FTS index rebuilt successfully")
+            logger.info("FTS index rebuild completed successfully")
+            
         except Exception as e:
             logger.error(f"Error rebuilding FTS index: {str(e)}")
-            self.conn.rollback()
+            raise
 
     @classmethod
-    def initialize_database_if_needed(cls):
-        """Initialize database only if it doesn't exist"""
+    async def initialize_database_if_needed(cls):
+        """Initialize the database if it doesn't exist"""
         db = cls()
-        db_file = Path("ethics.db")
-        
-        if db_file.exists():
-            try:
-                cursor = db.conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM papers")
-                count = cursor.fetchone()[0]
-                logger.info(f"Using existing database with {count} papers")
-                
-                # Rebuild FTS index
-                db.rebuild_fts_index()
-                
-                return db
-            except sqlite3.OperationalError as e:
-                logger.info(f"Database error ({str(e)}), recreating...")
-                db.conn.close()
-                db_file.unlink()
-        
-        # Create new database
-        db = cls()  # Create fresh connection
-        logger.info("Creating new database...")
-        
-        # Create tables
-        db.setup_database()
-        
-        # Load papers from JSON
-        data_file = Path('data') / 'pubmed_ethics_papers.json'
-        if not data_file.exists():
-            logger.error(f"Papers file not found at {data_file.absolute()}")
-            return None
+        await db.get_connection()
+        return db
+
+    def _build_column_query(self, terms: List[str], column: str) -> str:
+        """Build column-specific FTS query"""
+        query_parts = []
+        for term in terms:
+            clean_term = term.strip().lower()
+            clean_term = re.sub(r'[^\w\s]', ' ', clean_term).strip()
             
-        logger.info(f"Loading papers from {data_file}")
-        with open(data_file) as f:
-            papers = json.load(f)
-        logger.info(f"Loaded {len(papers)} papers")
-        
-        # Populate database
-        logger.info("Adding papers to database...")
-        for paper in papers:
-            try:
-                db.add_paper(**paper)  # Use kwargs expansion
-            except Exception as e:
-                logger.error(f"Error adding paper {paper.get('pubmed_id')}: {str(e)}")
+            if not clean_term:
                 continue
+            
+            if ' ' in clean_term:
+                query_parts.append(f'{column}:"{clean_term}"')
+            else:
+                query_parts.append(f'{column}:{clean_term}')
         
-        logger.info("Database initialization complete")
-        return db 
+        return ' OR '.join(query_parts) 

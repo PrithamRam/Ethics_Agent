@@ -1,46 +1,41 @@
-from fastapi import FastAPI, HTTPException, Depends, status, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Request, APIRouter
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, validator
 from src.medical_ethics_assistant import MedicalEthicsAssistant
+from src.ethics_db import EthicsDB
+from src.pubmed_handler import PubMedHandler
+from src.response_parser import ResponseParser
+from src.app import app
 import logging
 import uuid
 from typing import Optional, Dict, List, Any
-import os
-import io
-import csv
-from datetime import datetime
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 import json
-from .ethics_database import EthicsDatabase
-from .pubmed_handler import PubMedHandler
-from .response_parser import ResponseParser
 
-app = FastAPI(
-    title="Medical Ethics AI Assistant",
-    description="API for querying medical ethics papers and getting AI-generated responses",
-    version="1.0.0"
-)
 logger = logging.getLogger(__name__)
 
 # Store active conversations
 active_conversations = {}
 
+# Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific origins
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Mount static files directory with cache busting
+# Mount static files
 app.mount("/static", StaticFiles(directory="static", html=True), name="static")
 
 # Initialize components
-db = EthicsDatabase.initialize_database_if_needed()
+db = None  # Will be initialized during startup
 pubmed_handler = PubMedHandler()
 response_parser = ResponseParser()
+
+router = APIRouter()
 
 class Query(BaseModel):
     text: str
@@ -83,34 +78,57 @@ async def get_assistant(conversation_id: str = None):
     if conversation_id and conversation_id in active_conversations:
         return active_conversations[conversation_id]
     
+    # Create new instance without passing conversation_id
     assistant = await MedicalEthicsAssistant.create()
     if conversation_id:
         active_conversations[conversation_id] = assistant
     return assistant
 
-@app.post("/api/ethical-guidance")
-async def get_ethical_guidance(request: Request):
+@router.post("/ethical-guidance")
+async def get_ethical_guidance(query: Query):
+    """Get ethical guidance for a query"""
     try:
-        data = await request.json()
-        logger.info(f"Raw request data: {data}")
+        logger.info(f"\n{'='*50}\nReceived new query: {query.text}\n{'='*50}")
         
-        # Parse query and max_results
-        query = data.get('text', '')
-        max_results = int(data.get('max_results', 10))
-        logger.info(f"Parsed query: text='{query}' max_results={max_results}")
+        assistant = app.state.assistant
+        if not assistant:
+            logger.error("Assistant not initialized")
+            raise HTTPException(status_code=500, detail="Assistant not initialized")
         
-        # Search for relevant papers
-        papers = db.search_papers(query, max_results)
-        logger.info(f"Found {len(papers)} papers")
+        response = await assistant.get_ethical_guidance(query.text)
+        logger.info("\nRaw response from assistant:")
+        logger.info(f"{json.dumps(response, indent=2)}")
         
-        # Generate response
-        response = response_parser.generate_response(query, papers)
+        # Structure the response to match frontend expectations
+        formatted_response = {
+            "status": "success",
+            "data": {
+                "ai_analysis": {
+                    "summary": response["ai_analysis"].get("summary", ""),
+                    "recommendations": response["ai_analysis"].get("recommendations", []),
+                    "concerns": response["ai_analysis"].get("concerns", []),
+                    "mitigation_strategies": response["ai_analysis"].get("mitigation_strategies", []),
+                    "follow_up_questions": response["ai_analysis"].get("follow_up_questions", [])
+                },
+                "literature_analysis": response.get("literature_analysis", ""),
+                "relevant_papers": response.get("relevant_papers", [])
+            }
+        }
         
-        return response
+        logger.info("\nFormatted response for frontend:")
+        logger.info(f"{json.dumps(formatted_response, indent=2)}")
+        logger.info(f"\n{'='*50}\nRequest completed\n{'='*50}")
+        
+        return JSONResponse(formatted_response)
         
     except Exception as e:
-        logger.error(f"Error processing request: {str(e)}")
-        return {"error": str(e)}
+        logger.error("\nError in request processing:")
+        logger.error(f"{str(e)}", exc_info=True)
+        logger.error(f"\n{'='*50}\nRequest failed\n{'='*50}")
+        return JSONResponse({
+            "status": "error",
+            "error": str(e)
+        }, status_code=500)
 
 @app.post("/api/follow-up")
 async def get_follow_up(follow_up: FollowUp):
@@ -312,4 +330,38 @@ async def get_version():
         # Check if the file contains the correct request format
         if 'body: JSON.stringify({ text: query' in content:
             return {"status": "correct", "version": "new"}
-        return {"status": "incorrect", "version": "old"} 
+        return {"status": "incorrect", "version": "old"}
+
+@router.post("/analyze")
+async def analyze_query(query: Query) -> Dict[str, Any]:
+    """Analyze an ethical query"""
+    try:
+        # Get assistant from app state
+        assistant = app.state.assistant
+        
+        # Get ethical guidance
+        guidance = await assistant.get_ethical_guidance(query.text)
+        
+        return guidance
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/reset-db")
+async def reset_db():
+    """Reset the Elasticsearch database"""
+    db = EthicsDB()
+    success = await db.reset_elasticsearch()
+    await db.cleanup()
+    return {"status": "success" if success else "error"}
+
+# Add router to app
+app.include_router(router)
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize the assistant and database on startup"""
+    global db
+    db = EthicsDB()
+    app.state.assistant = await MedicalEthicsAssistant.create()
+    logger.info("Medical Ethics Assistant initialized") 
