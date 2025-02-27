@@ -1,4 +1,3 @@
-
 # Sensitive files
 .env
 *.db
@@ -7,8 +6,8 @@ __pycache__/
 
 # Data files
 *.csv
-*.json
-data/
+- *.json
+- data/
 medical_ethics_assistant_teams*.zip
 
 # OS files
